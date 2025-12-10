@@ -6,6 +6,7 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.*;
 import java.awt.event.*;
+import java.io.IOException;
 
 public class SOSGUIGame extends JFrame {
     // Symbol radio buttons
@@ -42,6 +43,10 @@ public class SOSGUIGame extends JFrame {
     JLabel currentTurnLabel;
     JButton newGameButton;
 
+    // NEW BUTTONS FOR SPRINT-5
+    JButton recordButton;
+    JButton replayButton;
+
     // State flags
     boolean gameModeChanged = false;
     boolean boardSizeChanged = false;
@@ -56,6 +61,11 @@ public class SOSGUIGame extends JFrame {
     // Timer for computer turns
     private Timer computerTimer;
 
+    // ---------------------- SPRINT-5 FIELDS ----------------------
+    private GameRecorder recorder;
+    private GameReplayer replayer;
+    private boolean isRecording = false;
+
     public SOSGUIGame() {
         initGameModel();
         initFrame();
@@ -64,6 +74,20 @@ public class SOSGUIGame extends JFrame {
         pack();
         setLocationRelativeTo(null);
         runComputerIfNeeded();
+
+        // ---------------------- SPRINT-5 BUTTON ACTIONS ----------------------
+        recordButton.addActionListener(e -> {
+            try {
+                recorder = new GameRecorder("sos_record.txt");
+                recorder.start();
+                isRecording = true;
+                JOptionPane.showMessageDialog(this, "Recording Started");
+            } catch (Exception ex) {
+                ex.printStackTrace();
+            }
+        });
+
+        replayButton.addActionListener(e -> startReplay());
     }
 
     // ---------------------- Initialization / UI building ----------------------
@@ -75,7 +99,7 @@ public class SOSGUIGame extends JFrame {
     }
 
     private void initFrame() {
-        setTitle("SOS Game - Sprint 4");
+        setTitle("SOS Game - Sprint 5");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setPreferredSize(new Dimension(700, 650));
         mainPanel = new JPanel(new BorderLayout());
@@ -119,24 +143,22 @@ public class SOSGUIGame extends JFrame {
         boardSizeTextField = new JTextField(String.valueOf(sosGame.getBoardSize()));
         boardSizeTextField.setColumns(2);
         boardSizeTextField.getDocument().addDocumentListener(new DocumentListener() {
-            @Override
-            public void insertUpdate(DocumentEvent e) {
-                boardSizeChanged = true;
-                handleBoardSizeTextChange(boardSizeTextField.getText());
-            }
-
-            @Override
-            public void removeUpdate(DocumentEvent e) { }
-
-            @Override
-            public void changedUpdate(DocumentEvent e) { }
+            @Override public void insertUpdate(DocumentEvent e) { boardSizeChanged = true; handleBoardSizeTextChange(boardSizeTextField.getText()); }
+            @Override public void removeUpdate(DocumentEvent e) {}
+            @Override public void changedUpdate(DocumentEvent e) {}
         });
+
+        // ---------------------- SPRINT-5 BUTTONS ----------------------
+        recordButton = new JButton("Record");
+        replayButton = new JButton("Replay");
 
         topPanel.add(sosLabel);
         topPanel.add(simpleGameRadioButton);
         topPanel.add(generalGameRadioButton);
         topPanel.add(boardSizeLabel);
         topPanel.add(boardSizeTextField);
+        topPanel.add(recordButton);
+        topPanel.add(replayButton);
         topPanel.setBorder(new EmptyBorder(10, 10, 10, 10));
 
         mainPanel.add(topPanel, BorderLayout.NORTH);
@@ -230,33 +252,41 @@ public class SOSGUIGame extends JFrame {
     }
 
     private void attachPlayerTypeListeners() {
-        blueHumanRadioButton.addItemListener(e -> {
-            if (e.getStateChange() == ItemEvent.SELECTED) {
-                bluePlayer = new HumanPlayer("Blue");
-            }
-        });
-        blueComputerRadioButton.addItemListener(e -> {
-            if (e.getStateChange() == ItemEvent.SELECTED) {
-                bluePlayer = new ComputerPlayer("Blue-CPU");
-                runComputerIfNeeded();
-            }
-        });
+        blueHumanRadioButton.addItemListener(e -> { if (e.getStateChange() == ItemEvent.SELECTED) bluePlayer = new HumanPlayer("Blue"); });
+        blueComputerRadioButton.addItemListener(e -> { if (e.getStateChange() == ItemEvent.SELECTED) { bluePlayer = new ComputerPlayer("Blue-CPU"); runComputerIfNeeded(); } });
 
-        redHumanRadioButton.addItemListener(e -> {
-            if (e.getStateChange() == ItemEvent.SELECTED) {
-                redPlayer = new HumanPlayer("Red");
-            }
-        });
-        redComputerRadioButton.addItemListener(e -> {
-            if (e.getStateChange() == ItemEvent.SELECTED) {
-                redPlayer = new ComputerPlayer("Red-CPU");
-                runComputerIfNeeded();
-            }
-        });
+        redHumanRadioButton.addItemListener(e -> { if (e.getStateChange() == ItemEvent.SELECTED) redPlayer = new HumanPlayer("Red"); });
+        redComputerRadioButton.addItemListener(e -> { if (e.getStateChange() == ItemEvent.SELECTED) { redPlayer = new ComputerPlayer("Red-CPU"); runComputerIfNeeded(); } });
+    }
+
+    // ---------------------- RECORD REPLAY CORE FUNCTION ----------------------
+
+    private void startReplay() {
+        try {
+            gameOver = false;
+
+            sosGame.reset(sosGame.getBoardSize());
+            updateBoard();
+
+            replayer = new GameReplayer(GameRecorder.load("sos_record.txt"));
+
+            new Timer(500, new ActionListener() {
+                public void actionPerformed(ActionEvent e) {
+                    if (!replayer.hasNext()) {
+                        ((Timer)e.getSource()).stop();
+                        return;
+                    }
+                    Move m = replayer.next();
+                    applyComputerMove(m);
+                }
+            }).start();
+
+        } catch (Exception ex) {
+            ex.printStackTrace();
+        }
     }
 
     // ---------------------- New Game / Board Size ----------------------
-
     private void newGameButtonClicked() {
         gameModeChanged = false;
         boardSizeChanged = false;
@@ -311,7 +341,7 @@ public class SOSGUIGame extends JFrame {
     }
 
     private void updateBoard() {
-        if (centerPanel == null) return; // called early in constructor
+        if (centerPanel == null) return;
         if (boardPanel != null) {
             centerPanel.remove(boardPanel);
         }
@@ -334,7 +364,7 @@ public class SOSGUIGame extends JFrame {
         centerPanel.repaint();
     }
 
-    // ---------------------- Click Handling (modular) ----------------------
+    // ---------------------- Click Handling ----------------------
 
     private void handleBoardButtonClick(JButton button, int row, int col) {
         if (isCurrentPlayerComputer()) {
@@ -415,9 +445,20 @@ public class SOSGUIGame extends JFrame {
         return sosGame.isBluePlayersTurn() ? Color.BLUE : Color.RED;
     }
 
+    // ---------------------- CORE MOVE LOGIC ----------------------
+
     private void applyMoveToButtonAndModel(JButton button, int row, int col, String symbol) {
         button.setText(symbol);
         sosGame.makeMove(row, col, symbol);
+
+        // ---------------------- SPRINT-5 RECORD MOVE ----------------------
+        if (isRecording && recorder != null) {
+            try {
+                recorder.recordMove(row, col, symbol);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
     }
 
     private void handleMoveResult(int row, int col, String symbol, Color color) {
@@ -482,7 +523,7 @@ public class SOSGUIGame extends JFrame {
         String symbol = m.symbol;
 
         if (buttons[r][c].getText().length() > 0) {
-            return; // already occupied
+            return;
         }
 
         Color color = getCurrentPlayerColor();
@@ -508,6 +549,12 @@ public class SOSGUIGame extends JFrame {
                 "Game Over!!!",
                 JOptionPane.INFORMATION_MESSAGE
         );
+
+        // ---------------------- STOP RECORDING ON GAME OVER ----------------------
+        if (recorder != null && isRecording) {
+            try { recorder.stop(); } catch (Exception ignored) {}
+            isRecording = false;
+        }
     }
 
     // ---------------------- Modular checkSequenceAndDrawLine ----------------------

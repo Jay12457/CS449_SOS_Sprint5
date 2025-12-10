@@ -1,0 +1,6 @@
+MODE:Simple
+SIZE:3
+BLUE:Blue
+RED:Red
+0,0,S
+0,1,O
